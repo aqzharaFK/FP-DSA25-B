@@ -1,17 +1,17 @@
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
-import java.awt.geom.Line2D;
+import java.awt.geom.Path2D;
 import java.awt.geom.Point2D;
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.*;
 import java.util.List;
 import java.util.Queue;
-import javax.sound.sampled.*;
 import javax.swing.Timer;
 
 // ===========================
-// 1. DATA MODELS (TIDAK BERUBAH)
+// 1. DATA MODELS
 // ===========================
 
 class Player implements Comparable<Player> {
@@ -21,11 +21,15 @@ class Player implements Comparable<Player> {
     private int score;
     private int wins;
     private Color color;
+    private String characterType; // Menyimpan tipe karakter (Doraemon, X, O, dll)
+    private ImageIcon avatarIcon;
 
-    public Player(int id, String name, Color color) {
+    public Player(int id, String name, Color color, String charType, ImageIcon icon) {
         this.id = id;
         this.name = name;
         this.color = color;
+        this.characterType = charType;
+        this.avatarIcon = icon;
         this.position = 1;
         this.score = 0;
         this.wins = 0;
@@ -41,60 +45,45 @@ class Player implements Comparable<Player> {
     public String getName() { return name; }
     public Color getColor() { return color; }
     public int getScore() { return score; }
+    public ImageIcon getAvatarIcon() { return avatarIcon; }
+    public String getCharacterType() { return characterType; }
 
     @Override
-    public int compareTo(Player other) {
-        return other.score - this.score; // Sort descending by score
-    }
-
+    public int compareTo(Player other) { return Integer.compare(other.score, this.score); }
     @Override
-    public String toString() {
-        return name;
-    }
+    public String toString() { return name; }
 }
 
 class GameBoard {
     private Map<Integer, Integer> snakes = new HashMap<>();
     private Map<Integer, Integer> ladders = new HashMap<>();
-    private Map<Integer, Integer> portals = new HashMap<>();
     private Map<Integer, Integer> cellScores = new HashMap<>();
 
     public GameBoard() {
         initObstacles();
-        initRandomLinks();
         initCellScores();
     }
 
     private void initObstacles() {
-        snakes.put(17, 7); snakes.put(54, 34); snakes.put(62, 19); snakes.put(98, 79);
-        ladders.put(3, 38); ladders.put(24, 87); ladders.put(57, 76); ladders.put(80, 100);
-    }
+        // Ular/Naga (Turun)
+        snakes.put(98, 79); snakes.put(95, 75); snakes.put(93, 73); snakes.put(87, 24);
+        snakes.put(64, 60); snakes.put(62, 19); snakes.put(54, 34); snakes.put(17, 7);
 
-    private void initRandomLinks() {
-        Random rand = new Random();
-        int count = 0;
-        while (count < 5) {
-            int start = rand.nextInt(90) + 2;
-            int end = rand.nextInt(98) + 1;
-
-            if (start != end && !snakes.containsKey(start) && !ladders.containsKey(start) && !portals.containsKey(start)) {
-                portals.put(start, end);
-                count++;
-            }
-        }
+        // Tangga (Naik)
+        ladders.put(4, 14); ladders.put(9, 31); ladders.put(20, 38); ladders.put(28, 84);
+        ladders.put(40, 59); ladders.put(51, 67); ladders.put(63, 81); ladders.put(71, 91);
     }
 
     private void initCellScores() {
         Random rand = new Random();
         for (int i = 1; i <= 100; i++) {
-            cellScores.put(i, rand.nextInt(91) + 10);
+            cellScores.put(i, rand.nextInt(50) + 10);
         }
     }
 
     public int checkJump(int pos) {
         if (snakes.containsKey(pos)) return snakes.get(pos);
         if (ladders.containsKey(pos)) return ladders.get(pos);
-        if (portals.containsKey(pos)) return portals.get(pos);
         return pos;
     }
 
@@ -109,66 +98,50 @@ class GameBoard {
     public int getScoreForCell(int pos) { return cellScores.getOrDefault(pos, 0); }
     public Map<Integer, Integer> getSnakes() { return snakes; }
     public Map<Integer, Integer> getLadders() { return ladders; }
-    public Map<Integer, Integer> getPortals() { return portals; }
 }
 
 // ===========================
-// 2. SOUND MANAGER (TIDAK BERUBAH)
-// ===========================
-class SoundManager {
-    private Clip bgClip;
-
-    public void playBackground(String filepath) {
-        try {
-            File musicPath = new File(filepath);
-            if (musicPath.exists()) {
-                AudioInputStream audioInput = AudioSystem.getAudioInputStream(musicPath);
-                bgClip = AudioSystem.getClip();
-                bgClip.open(audioInput);
-                bgClip.loop(Clip.LOOP_CONTINUOUSLY);
-                bgClip.start();
-            }
-        } catch (Exception e) {
-            System.out.println("Audio Error: " + e.getMessage());
-        }
-    }
-}
-
-// ===========================
-// 3. MAIN GAME CLASS
+// 2. MAIN GAME CLASS
 // ===========================
 
 public class SnakeLadderGame extends JFrame {
 
-    // Core Logic
     private GameBoard board;
     private Queue<Player> turnQueue;
     private List<Player> allPlayers;
     private boolean extraTurnPending = false;
     private List<Integer> currentShortestPath = new ArrayList<>();
 
-    // UI Layout Management
     private CardLayout cardLayout;
     private JPanel mainContainer;
-
-    // Game UI Components
     private BoardPanel boardPanel;
     private JTextArea logArea;
     private JLabel statusLabel;
     private JButton rollButton;
+    private JLabel diceImageLabel;
     private JTextArea leaderboardArea;
 
     // Menu Components
     private DefaultListModel<String> playerListModel;
-    private JList<String> playerListUI;
     private ArrayList<Player> tempPlayerList;
+    private JLabel playerCountLabel;
+    private JButton addPlayerBtn;
+    private JComboBox<String> charSelector; // Dropdown pemilihan karakter
 
-    private final Color[] colorPool = {Color.RED, Color.BLUE, Color.MAGENTA, Color.ORANGE, Color.CYAN, Color.PINK, new Color(0,100,0)};
+    // Asset Dadu
+    private ImageIcon[] diceIcons;
+
+    // Warna untuk dadu status
+    private final Color COLOR_GREEN_MOVE = new Color(34, 139, 34);
+    private final Color COLOR_RED_MOVE = new Color(220, 20, 60);
 
     public SnakeLadderGame() {
-        setTitle("Snake & Ladder: Spiral Edition");
-        setSize(1250, 850); // Sedikit diperbesar agar spiral terlihat jelas
+        setTitle("Snake & Ladder: Red/Green Dice Edition");
+        setSize(1280, 850);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setLocationRelativeTo(null);
+
+        loadDiceImages();
 
         cardLayout = new CardLayout();
         mainContainer = new JPanel(cardLayout);
@@ -177,86 +150,221 @@ public class SnakeLadderGame extends JFrame {
         mainContainer.add(menuPanel, "MENU");
 
         add(mainContainer);
+    }
 
-        new SoundManager().playBackground("bgm.wav");
+    private void loadDiceImages() {
+        diceIcons = new ImageIcon[6];
+        for (int i = 0; i < 6; i++) {
+            int diceValue = i + 1;
+            String path = diceValue + ".png";
+            File f = new File(path);
+            if (!f.exists()) path = "src/" + diceValue + ".png";
+
+            diceIcons[i] = loadScaledImage(path, 80, 80, diceValue);
+        }
+    }
+
+    private ImageIcon loadScaledImage(String path, int w, int h, int val) {
+        File f = new File(path);
+        if(f.exists()) {
+            ImageIcon ii = new ImageIcon(path);
+            Image img = ii.getImage().getScaledInstance(w, h, Image.SCALE_SMOOTH);
+            return new ImageIcon(img);
+        } else {
+            BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+            Graphics2D g = img.createGraphics();
+            g.setColor(Color.WHITE); g.fillRect(0,0,w,h);
+            g.setColor(Color.BLACK); g.drawRect(0,0,w-1,h-1);
+            g.setFont(new Font("Arial", Font.BOLD, 24));
+            g.drawString(String.valueOf(val), w/2-10, h/2+10);
+            g.dispose();
+            return new ImageIcon(img);
+        }
     }
 
     // ===========================
-    // A. MENU SCREEN (SETUP) - TIDAK BERUBAH
+    // UI MENU (INTEGRASI PEMILIHAN KARAKTER)
     // ===========================
     private JPanel createMenuPanel() {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(new Color(230, 240, 255));
+        JPanel panel = new JPanel(new GridBagLayout()) {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                Graphics2D g2d = (Graphics2D) g;
+                int w = getWidth(); int h = getHeight();
+                GradientPaint gp = new GradientPaint(0, 0, new Color(135, 206, 235), 0, h, new Color(224, 255, 255));
+                g2d.setPaint(gp); g2d.fillRect(0, 0, w, h);
+            }
+        };
 
-        JLabel title = new JLabel("SNAKE & LADDER SETUP", SwingConstants.CENTER);
+        JPanel contentBox = new JPanel(new BorderLayout());
+        contentBox.setOpaque(false);
+
+        JLabel title = new JLabel("SETUP PEMAIN", SwingConstants.CENTER);
         title.setFont(new Font("Segoe UI", Font.BOLD, 36));
-        title.setBorder(new EmptyBorder(30, 0, 30, 0));
-        panel.add(title, BorderLayout.NORTH);
+        title.setForeground(new Color(0, 102, 204));
+        title.setBorder(new EmptyBorder(0, 0, 30, 0));
 
-        JPanel centerPanel = new JPanel();
-        centerPanel.setLayout(new BoxLayout(centerPanel, BoxLayout.Y_AXIS));
-        centerPanel.setOpaque(false);
-        centerPanel.setBorder(new EmptyBorder(0, 100, 0, 100));
+        // Area Input
+        JPanel inputArea = new JPanel(new BorderLayout());
+        inputArea.setOpaque(false);
 
-        JPanel inputPanel = new JPanel(new FlowLayout());
-        inputPanel.setOpaque(false);
-        JTextField nameField = new JTextField(15);
-        nameField.setFont(new Font("Arial", Font.PLAIN, 18));
-        JButton addBtn = new JButton("Tambah Player");
-        addBtn.setFont(new Font("Arial", Font.BOLD, 14));
+        JPanel topInput = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        topInput.setOpaque(false);
+
+        JTextField nameField = new JTextField(10);
+        nameField.setFont(new Font("Arial", Font.PLAIN, 16));
+        nameField.setBorder(BorderFactory.createTitledBorder("Nama"));
+
+        // Dropdown Pilihan Karakter (Termasuk X dan O)
+        String[] characters = {"Doraemon", "Nobita", "Shizuka", "Giant", "Suneo", "Avatar X", "Avatar O"};
+        charSelector = new JComboBox<>(characters);
+        charSelector.setBorder(BorderFactory.createTitledBorder("Pilih Karakter"));
+        charSelector.setBackground(Color.WHITE);
+
+        addPlayerBtn = new JButton("Tambah");
+        addPlayerBtn.setBackground(new Color(100, 149, 237));
+        addPlayerBtn.setForeground(Color.WHITE);
+
+        playerCountLabel = new JLabel("Players: 0/4");
+        playerCountLabel.setFont(new Font("Arial", Font.BOLD, 14));
 
         tempPlayerList = new ArrayList<>();
         playerListModel = new DefaultListModel<>();
-        playerListUI = new JList<>(playerListModel);
-        playerListUI.setFont(new Font("Arial", Font.BOLD, 16));
+        JList<String> playerListUI = new JList<>(playerListModel);
+        playerListUI.setFont(new Font("Arial", Font.BOLD, 14));
+        JScrollPane listScroll = new JScrollPane(playerListUI);
+        listScroll.setPreferredSize(new Dimension(300, 120));
 
-        addBtn.addActionListener(e -> {
+        // LOGIKA TAMBAH PLAYER
+        addPlayerBtn.addActionListener(e -> {
             String name = nameField.getText().trim();
-            if (!name.isEmpty()) {
-                if (tempPlayerList.size() >= colorPool.length) {
-                    JOptionPane.showMessageDialog(this, "Maksimal player tercapai!");
+            String selectedChar = (String) charSelector.getSelectedItem();
+
+            if (!name.isEmpty() && selectedChar != null) {
+                if (tempPlayerList.size() >= 4) {
+                    JOptionPane.showMessageDialog(this, "Maksimal 4 pemain!");
                     return;
                 }
-                Color c = colorPool[tempPlayerList.size()];
-                Player newP = new Player(tempPlayerList.size(), name, c);
+
+                // Cek duplikasi karakter
+                for (Player p : tempPlayerList) {
+                    if (p.getCharacterType().equals(selectedChar)) {
+                        JOptionPane.showMessageDialog(this, "Karakter " + selectedChar + " sudah dipilih orang lain!");
+                        return;
+                    }
+                }
+
+                // Tentukan warna dan icon berdasarkan pilihan
+                Color c = getCharacterColor(selectedChar);
+                ImageIcon icon = createCharacterAvatar(selectedChar, c);
+
+                Player newP = new Player(tempPlayerList.size(), name, c, selectedChar, icon);
                 tempPlayerList.add(newP);
-                playerListModel.addElement("👤 " + name);
+                playerListModel.addElement(name + " (" + selectedChar + ")");
                 nameField.setText("");
+                updatePlayerCountUI();
             }
         });
 
-        JButton removeBtn = new JButton("Hapus Selected");
+        JButton removeBtn = new JButton("Hapus");
+        removeBtn.setBackground(Color.RED);
+        removeBtn.setForeground(Color.WHITE);
         removeBtn.addActionListener(e -> {
             int idx = playerListUI.getSelectedIndex();
             if (idx != -1) {
                 tempPlayerList.remove(idx);
                 playerListModel.remove(idx);
+                updatePlayerCountUI();
             }
         });
 
-        inputPanel.add(new JLabel("Nama: "));
-        inputPanel.add(nameField);
-        inputPanel.add(addBtn);
-        inputPanel.add(removeBtn);
+        topInput.add(nameField);
+        topInput.add(charSelector);
+        topInput.add(addPlayerBtn);
+        topInput.add(removeBtn);
 
-        centerPanel.add(inputPanel);
-        centerPanel.add(new JScrollPane(playerListUI));
-        panel.add(centerPanel, BorderLayout.CENTER);
+        inputArea.add(topInput, BorderLayout.NORTH);
+        JPanel listContainer = new JPanel(new BorderLayout());
+        listContainer.setOpaque(false);
+        listContainer.add(playerCountLabel, BorderLayout.NORTH);
+        listContainer.add(listScroll, BorderLayout.CENTER);
+        inputArea.add(listContainer, BorderLayout.SOUTH);
 
-        JButton startBtn = new JButton("MULAI PERMAINAN 🚀");
-        startBtn.setFont(new Font("Segoe UI", Font.BOLD, 24));
+        JButton startBtn = new JButton("MULAI MAIN ▶");
+        startBtn.setFont(new Font("Segoe UI", Font.BOLD, 22));
         startBtn.setBackground(new Color(50, 205, 50));
         startBtn.setForeground(Color.WHITE);
-        startBtn.setPreferredSize(new Dimension(200, 80));
+        startBtn.setPreferredSize(new Dimension(200, 60));
         startBtn.addActionListener(e -> startGame());
 
-        JPanel bottomPanel = new JPanel();
-        bottomPanel.setOpaque(false);
-        bottomPanel.setBorder(new EmptyBorder(20, 0, 20, 0));
-        bottomPanel.add(startBtn);
-        panel.add(bottomPanel, BorderLayout.SOUTH);
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = 0; gbc.gridy = 0; panel.add(title, gbc);
+        gbc.gridy = 1; panel.add(inputArea, gbc);
+        gbc.gridy = 2; panel.add(Box.createVerticalStrut(20), gbc);
+        gbc.gridy = 3; panel.add(startBtn, gbc);
 
         return panel;
+    }
+
+    private Color getCharacterColor(String type) {
+        switch (type) {
+            case "Doraemon": return Color.BLUE;
+            case "Nobita": return new Color(255, 215, 0);
+            case "Shizuka": return Color.PINK;
+            case "Giant": return new Color(255, 140, 0);
+            case "Suneo": return new Color(0, 255, 255);
+            case "Avatar X": return Color.RED;
+            case "Avatar O": return new Color(50, 205, 50);
+            default: return Color.GRAY;
+        }
+    }
+
+    // Helper membuat icon (termasuk menggambar X atau O jika dipilih)
+    private ImageIcon createCharacterAvatar(String type, Color c) {
+        // Coba load file gambar dulu
+        String filename = type.toLowerCase().replace(" ", "") + ".png"; // misal "avatarx.png"
+        File f = new File(filename);
+        if (!f.exists()) f = new File("src/" + filename);
+
+        if (f.exists()) {
+            return new ImageIcon(new ImageIcon(f.getPath()).getImage().getScaledInstance(30, 30, Image.SCALE_SMOOTH));
+        }
+
+        // Jika gambar tidak ada, buat secara manual
+        int size = 30;
+        BufferedImage img = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2 = img.createGraphics();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+        if (type.equals("Avatar X")) {
+            g2.setColor(Color.RED);
+            g2.setStroke(new BasicStroke(4));
+            g2.drawLine(5, 5, 25, 25);
+            g2.drawLine(25, 5, 5, 25);
+        } else if (type.equals("Avatar O")) {
+            g2.setColor(Color.GREEN);
+            g2.setStroke(new BasicStroke(4));
+            g2.drawOval(5, 5, 20, 20);
+        } else {
+            // Default wajah bulat berwarna
+            g2.setColor(c);
+            g2.fillOval(2, 2, size-4, size-4);
+            g2.setColor(Color.WHITE);
+            g2.drawOval(2, 2, size-4, size-4);
+            // Inisial
+            g2.setColor(Color.WHITE);
+            g2.setFont(new Font("Arial", Font.BOLD, 12));
+            g2.drawString(type.substring(0,1), 10, 20);
+        }
+        g2.dispose();
+        return new ImageIcon(img);
+    }
+
+    private void updatePlayerCountUI() {
+        int count = tempPlayerList.size();
+        playerCountLabel.setText("Players: " + count + "/4");
+        addPlayerBtn.setEnabled(count < 4);
     }
 
     private void startGame() {
@@ -264,13 +372,11 @@ public class SnakeLadderGame extends JFrame {
             JOptionPane.showMessageDialog(this, "Minimal 2 pemain diperlukan!");
             return;
         }
-
         board = new GameBoard();
         allPlayers = new ArrayList<>(tempPlayerList);
         turnQueue = new LinkedList<>(tempPlayerList);
 
         JPanel gameContainer = new JPanel(new BorderLayout());
-
         boardPanel = new BoardPanel();
         gameContainer.add(boardPanel, BorderLayout.CENTER);
 
@@ -282,114 +388,156 @@ public class SnakeLadderGame extends JFrame {
 
         updateTurnLabel();
         updateLeaderboard();
-        log("🎮 PERMAINAN DIMULAI! Papan Spiral.");
+        log("🎮 Permainan Dimulai!");
+        log("ℹ️ INFO DADU: Hijau = Maju, Merah = Mundur");
     }
 
     // ===========================
-    // B. GAME SCREEN (PLAY) - TIDAK BERUBAH
+    // GAME LOGIC (DADU MERAH & HIJAU)
     // ===========================
 
-    private JPanel createGameSidePanel() {
-        JPanel sidePanel = new JPanel(new BorderLayout());
-        sidePanel.setPreferredSize(new Dimension(320, 800));
-        sidePanel.setBorder(new EmptyBorder(10, 10, 10, 10));
-        sidePanel.setBackground(new Color(245, 245, 255));
-
-        JPanel controlBox = new JPanel(new GridLayout(2, 1, 5, 5));
-        controlBox.setOpaque(false);
-
-        statusLabel = new JLabel("Giliran...", SwingConstants.CENTER);
-        statusLabel.setFont(new Font("Segoe UI", Font.BOLD, 18));
-
-        rollButton = new JButton("🎲 KOCOK DADU");
-        rollButton.setFont(new Font("Segoe UI", Font.BOLD, 20));
-        rollButton.setBackground(new Color(100, 149, 237));
-        rollButton.setForeground(Color.WHITE);
-        rollButton.setFocusPainted(false);
-        rollButton.addActionListener(e -> playTurn());
-
-        controlBox.add(statusLabel);
-        controlBox.add(rollButton);
-
-        leaderboardArea = new JTextArea();
-        leaderboardArea.setEditable(false);
-        leaderboardArea.setFont(new Font("Monospaced", Font.BOLD, 12));
-        leaderboardArea.setBorder(BorderFactory.createTitledBorder("🏆 KLASEMEN"));
-
-        logArea = new JTextArea();
-        logArea.setEditable(false);
-        logArea.setLineWrap(true);
-        JScrollPane logScroll = new JScrollPane(logArea);
-        logScroll.setBorder(BorderFactory.createTitledBorder("Riwayat Permainan"));
-        logScroll.setPreferredSize(new Dimension(300, 300));
-
-        sidePanel.add(controlBox, BorderLayout.NORTH);
-        sidePanel.add(new JScrollPane(leaderboardArea), BorderLayout.CENTER);
-        sidePanel.add(logScroll, BorderLayout.SOUTH);
-
-        return sidePanel;
-    }
-
-    // ===========================
-    // GAME LOGIC - TIDAK BERUBAH
-    // ===========================
-
-    private void playTurn() {
+    private void startDiceRollAnimation() {
         if (turnQueue.isEmpty()) return;
         rollButton.setEnabled(false);
+        log("🎲 Mengocok dadu...");
 
+        Timer animTimer = new Timer(50, null);
+        final int[] cycles = {0};
+        animTimer.addActionListener(e -> {
+            int randomFace = (int)(Math.random() * 6);
+            diceImageLabel.setIcon(diceIcons[randomFace]);
+            cycles[0]++;
+            if (cycles[0] > 10) {
+                animTimer.stop();
+                finalizeDiceRoll();
+            }
+        });
+        animTimer.start();
+    }
+
+    private void finalizeDiceRoll() {
         Player currentPlayer = turnQueue.peek();
-        currentShortestPath.clear();
+        int diceValue = (int) (Math.random() * 6) + 1;
+        diceImageLabel.setIcon(diceIcons[diceValue - 1]);
 
-        if (board.isPrime(currentPlayer.getPosition())) {
-            log("✨ " + currentPlayer.getName() + " di posisi PRIMA! Jalur terpendek ditampilkan.");
-            calculateShortestPath(currentPlayer.getPosition());
-            boardPanel.repaint();
+        // LOGIKA DADU MERAH / HIJAU
+        // 70% Kemungkinan Hijau (Maju), 30% Merah (Mundur)
+        boolean isGreen = Math.random() < 0.7;
+
+        int steps = diceValue;
+        String colorText;
+        Color logColor;
+
+        if (isGreen) {
+            colorText = "HIJAU (MAJU)";
+            logColor = COLOR_GREEN_MOVE;
+        } else {
+            steps = -diceValue; // Mundur
+            colorText = "MERAH (MUNDUR)";
+            logColor = COLOR_RED_MOVE;
         }
 
-        int diceValue = (int) (Math.random() * 6) + 1;
-        boolean isGreen = Math.random() < 0.75;
+        log(currentPlayer.getName() + ": Dadu " + diceValue + " -> " + colorText);
 
-        int movement = isGreen ? diceValue : -diceValue;
-        String diceColor = isGreen ? "🟢 HIJAU (Maju)" : "🔴 MERAH (Mundur)";
+        processMovement(currentPlayer, steps);
+    }
 
-        log(currentPlayer.getName() + " dapat dadu: " + diceValue + " " + diceColor);
+    private void processMovement(Player currentPlayer, int steps) {
+        currentShortestPath.clear();
+        if (board.isPrime(currentPlayer.getPosition())) {
+            calculateShortestPath(currentPlayer.getPosition());
+        }
 
         int startPos = currentPlayer.getPosition();
-        int calculatedTarget = startPos + movement;
+        int targetPos = startPos + steps;
 
-        if (calculatedTarget > 100) calculatedTarget = startPos;
-        if (calculatedTarget < 1) calculatedTarget = 1;
+        // Aturan batas bawah dan atas
+        if (targetPos < 1) targetPos = 1;
+        if (targetPos > 100) targetPos = 200 - targetPos; // Memantul jika lebih dari 100 (opsional) atau diam di tempat.
+        // Kita pakai aturan harus pas 100. Jika lebih, diam di tempat (opsi simpel)
+        if (startPos + steps > 100) targetPos = startPos;
 
-        final int finalTarget = calculatedTarget;
+        final int finalTarget = targetPos; // effectively final for lambda
 
         animateMove(currentPlayer, finalTarget, () -> {
-            int obstacleDest = board.checkJump(finalTarget);
+            // Cek Ular/Tangga
+            int obstacleDest = board.checkJump(currentPlayer.getPosition());
 
-            if (obstacleDest != finalTarget) {
-                String type = (obstacleDest > finalTarget) ? "Naik Tangga/Portal 🚀" : "Digigit Ular 🐍";
-                log(type + "! Pindah ke " + obstacleDest);
+            if (obstacleDest != currentPlayer.getPosition()) {
+                String type = (obstacleDest > currentPlayer.getPosition()) ? "NAIK TANGGA! 🪜" : "DITANGKAP NAGA! 🐉";
+                log(type + " Pindah ke " + obstacleDest);
                 currentPlayer.setPosition(obstacleDest);
                 boardPanel.repaint();
             }
 
-            int nodeScore = board.getScoreForCell(currentPlayer.getPosition());
-            currentPlayer.addScore(nodeScore);
+            currentPlayer.addScore(board.getScoreForCell(currentPlayer.getPosition()));
 
             if (currentPlayer.getPosition() == 100) {
                 currentPlayer.addWin();
                 JOptionPane.showMessageDialog(this, "SELAMAT! " + currentPlayer.getName() + " MENANG!");
                 resetGameToMenu();
             } else {
-                if (currentPlayer.getPosition() % 5 == 0) {
-                    log("⭐ Berhenti di Bintang! Main lagi!");
-                    extraTurnPending = true;
-                } else {
-                    extraTurnPending = false;
-                }
+                extraTurnPending = (currentPlayer.getPosition() % 10 == 0 && currentPlayer.getPosition() != 100);
+                if(extraTurnPending) log("⭐ Bonus Giliran (Kelipatan 10)!");
                 finishTurn(currentPlayer);
             }
         });
+    }
+
+    // ===========================
+    // UI SIDE PANEL
+    // ===========================
+
+    private JPanel createGameSidePanel() {
+        JPanel sidePanel = new JPanel(new BorderLayout());
+        sidePanel.setPreferredSize(new Dimension(320, 800));
+        sidePanel.setBorder(new EmptyBorder(10, 10, 10, 10));
+        sidePanel.setBackground(new Color(230, 245, 255));
+
+        JPanel controlBox = new JPanel();
+        controlBox.setLayout(new BoxLayout(controlBox, BoxLayout.Y_AXIS));
+        controlBox.setOpaque(false);
+        controlBox.setBorder(BorderFactory.createTitledBorder("Kontrol"));
+
+        statusLabel = new JLabel("Giliran...", SwingConstants.CENTER);
+        statusLabel.setFont(new Font("Segoe UI", Font.BOLD, 18));
+        statusLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        diceImageLabel = new JLabel(diceIcons[0]);
+        diceImageLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        diceImageLabel.setBorder(new EmptyBorder(10,0,10,0));
+
+        rollButton = new JButton("KOCOK DADU");
+        rollButton.setFont(new Font("Segoe UI Black", Font.BOLD, 18));
+        rollButton.setBackground(new Color(70, 130, 180));
+        rollButton.setForeground(Color.WHITE);
+        rollButton.setAlignmentX(Component.CENTER_ALIGNMENT);
+        rollButton.addActionListener(e -> startDiceRollAnimation());
+
+        controlBox.add(statusLabel);
+        controlBox.add(Box.createVerticalStrut(10));
+        controlBox.add(diceImageLabel);
+        controlBox.add(Box.createVerticalStrut(10));
+        controlBox.add(rollButton);
+
+        leaderboardArea = new JTextArea();
+        leaderboardArea.setEditable(false);
+        leaderboardArea.setFont(new Font("Monospaced", Font.BOLD, 12));
+        JScrollPane leaderScroll = new JScrollPane(leaderboardArea);
+        leaderScroll.setBorder(BorderFactory.createTitledBorder("🏆 KLASEMEN"));
+
+        logArea = new JTextArea();
+        logArea.setEditable(false);
+        logArea.setLineWrap(true);
+        JScrollPane logScroll = new JScrollPane(logArea);
+        logScroll.setBorder(BorderFactory.createTitledBorder("Riwayat"));
+        logScroll.setPreferredSize(new Dimension(280, 200));
+
+        sidePanel.add(controlBox, BorderLayout.NORTH);
+        sidePanel.add(leaderScroll, BorderLayout.CENTER);
+        sidePanel.add(logScroll, BorderLayout.SOUTH);
+
+        return sidePanel;
     }
 
     private void finishTurn(Player p) {
@@ -408,6 +556,7 @@ public class SnakeLadderGame extends JFrame {
         tempPlayerList.clear();
         playerListModel.clear();
         logArea.setText("");
+        updatePlayerCountUI();
     }
 
     private void updateLeaderboard() {
@@ -417,8 +566,8 @@ public class SnakeLadderGame extends JFrame {
         while (!pq.isEmpty()) {
             Player p = pq.poll();
             sb.append(rank).append(". ").append(p.getName())
-                    .append(" [Pos:").append(p.getPosition()).append("]")
-                    .append(" : ").append(p.getScore()).append("\n");
+                    .append(" (").append(p.getCharacterType()).append(")\n")
+                    .append("   Pos: ").append(p.getPosition()).append(" | Skor: ").append(p.getScore()).append("\n");
             rank++;
         }
         leaderboardArea.setText(sb.toString());
@@ -429,61 +578,21 @@ public class SnakeLadderGame extends JFrame {
         Player p = turnQueue.peek();
         statusLabel.setText("Giliran: " + p.getName());
         statusLabel.setForeground(p.getColor());
+        // Jika ada icon X atau O, tampilkan di label juga bisa (opsional)
     }
 
     private void log(String msg) {
-        if (logArea != null) {
-            logArea.append(msg + "\n");
-            logArea.setCaretPosition(logArea.getDocument().getLength());
-        } else {
-            System.out.println(msg);
-        }
-    }
-
-    // ===========================
-    // UTILS (BFS & ANIMATION) - TIDAK BERUBAH
-    // ===========================
-
-    private void calculateShortestPath(int startNode) {
-        Queue<List<Integer>> q = new LinkedList<>();
-        boolean[] visited = new boolean[101];
-
-        List<Integer> initialPath = new ArrayList<>();
-        initialPath.add(startNode);
-        q.add(initialPath);
-        visited[startNode] = true;
-
-        while(!q.isEmpty()) {
-            List<Integer> path = q.poll();
-            int last = path.get(path.size()-1);
-            if (last == 100) {
-                currentShortestPath = path;
-                return;
-            }
-            for(int i=1; i<=6; i++) {
-                int next = last + i;
-                if (next <= 100) {
-                    int dest = board.checkJump(next);
-                    if (!visited[dest]) {
-                        visited[dest] = true;
-                        List<Integer> newPath = new ArrayList<>(path);
-                        newPath.add(dest);
-                        q.add(newPath);
-                    }
-                }
-            }
-        }
+        logArea.append("• " + msg + "\n");
+        logArea.setCaretPosition(logArea.getDocument().getLength());
     }
 
     private void animateMove(Player p, int target, Runnable onComplete) {
-        Timer timer = new Timer(200, null);
+        Timer timer = new Timer(100, null);
         timer.addActionListener(e -> {
             int current = p.getPosition();
-            if (current < target) {
-                p.move(1);
-            } else if (current > target) {
-                p.move(-1);
-            } else {
+            if (current < target) p.move(1);
+            else if (current > target) p.move(-1);
+            else {
                 timer.stop();
                 onComplete.run();
             }
@@ -492,51 +601,110 @@ public class SnakeLadderGame extends JFrame {
         timer.start();
     }
 
+    private void calculateShortestPath(int startNode) {
+        Queue<List<Integer>> q = new LinkedList<>();
+        boolean[] visited = new boolean[101];
+        List<Integer> initialPath = new ArrayList<>();
+        initialPath.add(startNode); q.add(initialPath); visited[startNode] = true;
+        while(!q.isEmpty()) {
+            List<Integer> path = q.poll();
+            int last = path.get(path.size()-1);
+            if (last == 100) { currentShortestPath = path; return; }
+            for(int i=1; i<=6; i++) {
+                int next = last + i;
+                if (next <= 100) {
+                    int dest = board.checkJump(next);
+                    if (!visited[dest]) {
+                        visited[dest] = true;
+                        List<Integer> newPath = new ArrayList<>(path); newPath.add(dest); q.add(newPath);
+                    }
+                }
+            }
+        }
+    }
+
     // ===========================
-    // VISUAL BOARD (SPIRAL MODE - DIROMBAK TOTAL)
+    // BOARD PANEL (TIDAK BERUBAH DARI SEBELUMNYA)
     // ===========================
     class BoardPanel extends JPanel {
-        // Menyimpan posisi tengah dari setiap cell (index 0 = cell 1, index 99 = cell 100)
-        private List<Point> cellPositions;
-        private final int CELL_SIZE = 35; // Ukuran tetap untuk lingkaran cell
+        private final Point[] tileCoords = new Point[101];
+        private final int TILE_RADIUS = 22;
 
         public BoardPanel() {
-            setBackground(new Color(240, 248, 255)); // Alice Blue background
-            cellPositions = new ArrayList<>();
+            setBackground(new Color(135, 206, 250));
+            initPathCoords();
         }
 
-        // Fungsi untuk menghitung posisi spiral berdasarkan ukuran panel saat ini
-        private void calculateSpiralPositions(int w, int h) {
-            cellPositions.clear();
-            double centerX = w / 2.0;
-            double centerY = h / 2.0;
+        private void initPathCoords() {
+            // Baris bawah (Start -> Kanan)
+            tileCoords[1] = new Point(60, 750);  tileCoords[2] = new Point(110, 730);
+            tileCoords[3] = new Point(160, 720); tileCoords[4] = new Point(210, 730);
+            tileCoords[5] = new Point(260, 750); tileCoords[6] = new Point(310, 720);
+            tileCoords[7] = new Point(360, 690); tileCoords[8] = new Point(410, 670);
+            tileCoords[9] = new Point(460, 660); tileCoords[10] = new Point(510, 670);
 
-            // Radius maksimum agar spiral muat di layar dengan sedikit padding
-            double maxRadius = Math.min(w, h) / 2.0 * 0.85;
-            // Radius minimum agar angka 100 tidak terlalu rapat di tengah
-            double minRadius = CELL_SIZE * 1.5;
+            // Naik dan berbelok ke kiri
+            tileCoords[11] = new Point(560, 690); tileCoords[12] = new Point(610, 720);
+            tileCoords[13] = new Point(660, 700); tileCoords[14] = new Point(700, 660);
+            tileCoords[15] = new Point(730, 610); tileCoords[16] = new Point(700, 570);
+            tileCoords[17] = new Point(650, 550); tileCoords[18] = new Point(600, 540);
+            tileCoords[19] = new Point(550, 550); tileCoords[20] = new Point(500, 570);
 
-            // Jumlah putaran spiral
-            double rotations = 4.5;
-            double totalAngle = Math.PI * 2 * rotations;
-            double startAngle = -Math.PI / 2; // Mulai dari atas (jam 12)
+            // Lanjut ke kiri
+            tileCoords[21] = new Point(450, 600); tileCoords[22] = new Point(400, 620);
+            tileCoords[23] = new Point(350, 630); tileCoords[24] = new Point(300, 620);
+            tileCoords[25] = new Point(250, 600); tileCoords[26] = new Point(200, 580);
+            tileCoords[27] = new Point(150, 570); tileCoords[28] = new Point(100, 580);
+            tileCoords[29] = new Point(60, 600);  tileCoords[30] = new Point(50, 550);
 
-            for (int i = 0; i < 100; i++) {
-                // Normalisasi i dari 0.0 ke 1.0
-                double ratio = i / 99.0;
+            // Naik di sisi kiri
+            tileCoords[31] = new Point(60, 500);  tileCoords[32] = new Point(90, 460);
+            tileCoords[33] = new Point(130, 430); tileCoords[34] = new Point(180, 410);
+            tileCoords[35] = new Point(230, 400); tileCoords[36] = new Point(280, 410);
+            tileCoords[37] = new Point(330, 430); tileCoords[38] = new Point(380, 450);
+            tileCoords[39] = new Point(430, 430); tileCoords[40] = new Point(470, 400);
 
-                // Radius mengecil saat mendekati 100 (i mendekati 99)
-                double radius = maxRadius - (maxRadius - minRadius) * ratio;
+            // Area tengah berliku
+            tileCoords[41] = new Point(510, 370); tileCoords[42] = new Point(550, 350);
+            tileCoords[43] = new Point(590, 340); tileCoords[44] = new Point(630, 350);
+            tileCoords[45] = new Point(670, 370); tileCoords[46] = new Point(710, 400);
+            tileCoords[47] = new Point(750, 430); tileCoords[48] = new Point(790, 450);
+            tileCoords[49] = new Point(830, 430); tileCoords[50] = new Point(860, 400);
 
-                // Sudut bertambah seiring bertambahnya i
-                double angle = startAngle + totalAngle * ratio;
+            // Naik di sisi kanan
+            tileCoords[51] = new Point(880, 350); tileCoords[52] = new Point(860, 300);
+            tileCoords[53] = new Point(820, 270); tileCoords[54] = new Point(770, 260);
+            tileCoords[55] = new Point(720, 270); tileCoords[56] = new Point(670, 290);
+            tileCoords[57] = new Point(620, 310); tileCoords[58] = new Point(570, 300);
+            tileCoords[59] = new Point(530, 270); tileCoords[60] = new Point(500, 230);
 
-                // Rumus Matematika Spiral (Polar ke Cartesian)
-                int x = (int) (centerX + radius * Math.cos(angle));
-                int y = (int) (centerY + radius * Math.sin(angle));
+            // Menuju kiri atas
+            tileCoords[61] = new Point(460, 200); tileCoords[62] = new Point(410, 190);
+            tileCoords[63] = new Point(360, 200); tileCoords[64] = new Point(310, 220);
+            tileCoords[65] = new Point(260, 250); tileCoords[66] = new Point(210, 270);
+            tileCoords[67] = new Point(160, 280); tileCoords[68] = new Point(120, 260);
+            tileCoords[69] = new Point(90, 230);  tileCoords[70] = new Point(70, 190);
 
-                cellPositions.add(new Point(x, y));
-            }
+            // Pojok kiri atas dan kembali ke kanan
+            tileCoords[71] = new Point(70, 140);  tileCoords[72] = new Point(100, 100);
+            tileCoords[73] = new Point(140, 80);  tileCoords[74] = new Point(190, 70);
+            tileCoords[75] = new Point(240, 70);  tileCoords[76] = new Point(290, 80);
+            tileCoords[77] = new Point(340, 100); tileCoords[78] = new Point(390, 130);
+            tileCoords[79] = new Point(440, 150); tileCoords[80] = new Point(490, 160);
+
+            // Bagian akhir menuju kanan atas
+            tileCoords[81] = new Point(540, 160); tileCoords[82] = new Point(590, 150);
+            tileCoords[83] = new Point(640, 130); tileCoords[84] = new Point(690, 110);
+            tileCoords[85] = new Point(740, 100); tileCoords[86] = new Point(790, 100);
+            tileCoords[87] = new Point(840, 110); tileCoords[88] = new Point(880, 130);
+            tileCoords[89] = new Point(910, 160); tileCoords[90] = new Point(930, 200);
+
+            // Finish line
+            tileCoords[91] = new Point(930, 250); tileCoords[92] = new Point(910, 290);
+            tileCoords[93] = new Point(880, 320); tileCoords[94] = new Point(840, 330);
+            tileCoords[95] = new Point(800, 320); tileCoords[96] = new Point(770, 290);
+            tileCoords[97] = new Point(750, 250); tileCoords[98] = new Point(750, 200);
+            tileCoords[99] = new Point(770, 160); tileCoords[100]= new Point(800, 120);
         }
 
         @Override
@@ -545,127 +713,141 @@ public class SnakeLadderGame extends JFrame {
             Graphics2D g2 = (Graphics2D) g;
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-            int w = getWidth();
-            int h = getHeight();
+            drawBackground(g2);
+            drawPath(g2);
+            drawObstacles(g2);
+            drawTiles(g2);
 
-            // Hitung ulang posisi jika ukuran window berubah
-            if (cellPositions.isEmpty() || w != getWidth() || h != getHeight()) {
-                calculateSpiralPositions(w, h);
-            }
-
-            // 1. Gambar Garis Lintasan Spiral
-            g2.setColor(new Color(200, 200, 200));
-            g2.setStroke(new BasicStroke(3f));
-            if (cellPositions.size() > 1) {
-                Point2D prev = cellPositions.get(0);
-                for (int i = 1; i < 100; i++) {
-                    Point2D curr = cellPositions.get(i);
-                    g2.draw(new Line2D.Double(prev, curr));
-                    prev = curr;
-                }
-            }
-
-            // 2. Gambar Cell (Lingkaran Angka)
-            for (int i = 0; i < 100; i++) {
-                Point p = cellPositions.get(i);
-                int num = i + 1;
-                int x = p.x - CELL_SIZE / 2;
-                int y = p.y - CELL_SIZE / 2;
-
-                // Warna dasar cell
-                if (num % 5 == 0) g2.setColor(new Color(255, 215, 0)); // Emas untuk bintang
-                else g2.setColor(Color.WHITE);
-
-                // Highlight jalur terpendek (jika ada)
-                if (currentShortestPath.contains(num)) {
-                    g2.setColor(new Color(135, 206, 250)); // Sky Blue
-                }
-
-                g2.fillOval(x, y, CELL_SIZE, CELL_SIZE);
-                g2.setColor(Color.GRAY);
-                g2.setStroke(new BasicStroke(2f));
-                g2.drawOval(x, y, CELL_SIZE, CELL_SIZE);
-
-                // Gambar Nomor
-                g2.setColor(Color.DARK_GRAY);
-                g2.setFont(new Font("Arial", Font.BOLD, 12));
-                FontMetrics fm = g2.getFontMetrics();
-                String numStr = String.valueOf(num);
-                int textX = p.x - fm.stringWidth(numStr) / 2;
-                int textY = p.y + fm.getAscent() / 2 - 2;
-                g2.drawString(numStr, textX, textY);
-
-                // Icon Bintang
-                if (num % 5 == 0) {
-                    g2.setColor(new Color(255, 69, 0));
-                    g2.setFont(new Font("SansSerif", Font.BOLD, 16));
-                    g2.drawString("★", p.x + 8, p.y - 8);
-                }
-            }
-
-            // 3. Gambar Koneksi (Ular/Tangga/Portal)
-            // Menggunakan posisi dari cellPositions
-            drawConnections(g2, board.getSnakes(), new Color(220, 20, 60, 180), 4); // Merah transparan
-            drawConnections(g2, board.getLadders(), new Color(34, 139, 34, 180), 4); // Hijau transparan
-            drawConnections(g2, board.getPortals(), new Color(30, 144, 255, 180), 3); // Biru transparan
-
-            // 4. Gambar Player
+            // Gambar Player
             if (allPlayers != null) {
-                for (Player player : allPlayers) {
-                    drawPlayer(g2, player);
+                for (int i=0; i<allPlayers.size(); i++) {
+                    drawPlayer(g2, allPlayers.get(i), i, allPlayers.size());
                 }
+            }
+            drawFinishGate(g2, tileCoords[100]);
+        }
+
+        private void drawBackground(Graphics2D g2) {
+            GradientPaint gp = new GradientPaint(0, 0, new Color(135, 206, 235), 0, getHeight(), new Color(240, 255, 255));
+            g2.setPaint(gp);
+            g2.fillRect(0, 0, getWidth(), getHeight());
+            g2.setColor(new Color(255, 255, 255, 200));
+            g2.fillOval(100, 150, 250, 120);
+            g2.fillOval(500, 50, 300, 150);
+        }
+
+        private void drawPath(Graphics2D g2) {
+            g2.setColor(new Color(255, 255, 255, 150));
+            g2.setStroke(new BasicStroke(15f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            Path2D path = new Path2D.Float();
+            path.moveTo(tileCoords[1].x, tileCoords[1].y);
+            for (int i = 2; i <= 100; i++) path.lineTo(tileCoords[i].x, tileCoords[i].y);
+            g2.draw(path);
+        }
+
+        private void drawTiles(Graphics2D g2) {
+            for (int i = 1; i <= 100; i++) {
+                Point p = tileCoords[i];
+                Color baseColor;
+                int colorPattern = i % 6;
+                if (i == 100) baseColor = new Color(255, 215, 0);
+                else if (i == 1) baseColor = new Color(144, 238, 144);
+                else if (colorPattern == 0 || colorPattern == 3) baseColor = new Color(173, 255, 47);
+                else if (colorPattern == 1) baseColor = new Color(255, 250, 205);
+                else if (colorPattern == 2 || colorPattern == 5) baseColor = new Color(255, 182, 193);
+                else baseColor = new Color(176, 224, 230);
+
+                if (currentShortestPath.contains(i)) baseColor = new Color(135, 206, 250);
+
+                Polygon hex = new Polygon();
+                for (int j = 0; j < 6; j++) {
+                    hex.addPoint((int) (p.x + TILE_RADIUS * Math.cos(j * Math.PI / 3)),
+                            (int) (p.y + TILE_RADIUS * Math.sin(j * Math.PI / 3)));
+                }
+
+                g2.setColor(baseColor);
+                g2.fillPolygon(hex);
+                g2.setColor(new Color(0,0,0,50));
+                g2.setStroke(new BasicStroke(2));
+                g2.drawPolygon(hex);
+
+                g2.setColor(Color.DARK_GRAY);
+                g2.setFont(new Font("Arial", Font.BOLD, 11));
+                FontMetrics fm = g2.getFontMetrics();
+                String numStr = String.valueOf(i);
+                g2.drawString(numStr, p.x - fm.stringWidth(numStr)/2, p.y + fm.getAscent()/2 - 2);
             }
         }
 
-        private void drawPlayer(Graphics2D g2, Player p) {
-            int posIndex = p.getPosition() - 1;
-            if (posIndex < 0 || posIndex >= cellPositions.size()) return;
-
-            Point center = cellPositions.get(posIndex);
-
-            int playerSize = CELL_SIZE - 10;
-
-            // Offset agar player tidak menumpuk persis di tengah jika di posisi sama
-            int offsetVal = 6;
-            int offsetX = (p.hashCode() % 3 - 1) * offsetVal;
-            int offsetY = ((p.hashCode() / 3) % 3 - 1) * offsetVal;
-
-            int x = center.x - playerSize / 2 + offsetX;
-            int y = center.y - playerSize / 2 + offsetY;
-
-            // Efek bayangan sedikit
-            g2.setColor(new Color(0,0,0,50));
-            g2.fillOval(x+2, y+2, playerSize, playerSize);
-
-            g2.setColor(p.getColor());
-            g2.fillOval(x, y, playerSize, playerSize);
-
-            g2.setColor(Color.WHITE);
-            g2.setStroke(new BasicStroke(2f));
-            g2.drawOval(x, y, playerSize, playerSize);
+        private void drawObstacles(Graphics2D g2) {
+            // Tangga
+            g2.setColor(new Color(218, 165, 32, 200));
+            g2.setStroke(new BasicStroke(6f));
+            for (Map.Entry<Integer, Integer> entry : board.getLadders().entrySet()) {
+                Point p1 = tileCoords[entry.getKey()];
+                Point p2 = tileCoords[entry.getValue()];
+                g2.drawLine(p1.x, p1.y, p2.x, p2.y);
+            }
+            // Ular
+            g2.setColor(new Color(0, 128, 128, 180));
+            g2.setStroke(new BasicStroke(8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            for (Map.Entry<Integer, Integer> entry : board.getSnakes().entrySet()) {
+                Point start = tileCoords[entry.getKey()];
+                Point end = tileCoords[entry.getValue()];
+                Path2D path = new Path2D.Float();
+                path.moveTo(start.x, start.y);
+                double ctrlX = start.x + (end.x - start.x) / 2.0 + (new Random().nextInt(100)-50);
+                double ctrlY = start.y + (end.y - start.y) / 2.0 - 100;
+                path.quadTo(ctrlX, ctrlY, end.x, end.y);
+                g2.draw(path);
+                g2.fillOval(start.x-8, start.y-8, 16, 16);
+            }
         }
 
-        private void drawConnections(Graphics2D g2, Map<Integer, Integer> map, Color c, int thick) {
-            g2.setColor(c);
-            g2.setStroke(new BasicStroke(thick, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-            for (Map.Entry<Integer, Integer> entry : map.entrySet()) {
-                int startIdx = entry.getKey() - 1;
-                int endIdx = entry.getValue() - 1;
+        private void drawFinishGate(Graphics2D g2, Point p) {
+            g2.setColor(new Color(139, 69, 19));
+            g2.fillRect(p.x - 25, p.y - 30, 5, 40);
+            g2.fillRect(p.x + 20, p.y - 30, 5, 40);
+            g2.fillRect(p.x - 30, p.y - 35, 60, 10);
+            g2.setColor(Color.YELLOW);
+            g2.setFont(new Font("Arial", Font.BOLD, 10));
+            g2.drawString("FINISH", p.x - 18, p.y - 27);
+        }
 
-                if (startIdx >= 0 && startIdx < 100 && endIdx >= 0 && endIdx < 100) {
-                    Point p1 = cellPositions.get(startIdx);
-                    Point p2 = cellPositions.get(endIdx);
-                    g2.draw(new Line2D.Double(p1, p2));
+        private void drawPlayer(Graphics2D g2, Player p, int index, int total) {
+            int posIdx = p.getPosition();
+            if (posIdx < 1 || posIdx > 100) return;
 
-                    // Gambar panah/lingkaran di tujuan
-                    g2.fillOval(p2.x - thick*2, p2.y - thick*2, thick*4, thick*4);
-                }
+            Point center = tileCoords[posIdx];
+            int size = 28;
+            int offsetX = 0, offsetY = 0;
+            if (total > 1) {
+                offsetX = (index % 2 == 0 ? -1 : 1) * 8;
+                offsetY = (index < 2 ? -1 : 1) * 8;
+            }
+
+            int x = center.x - size/2 + offsetX;
+            int y = center.y - size/2 + offsetY;
+
+            // Gambar avatar khusus (X, O, atau gambar doraemon)
+            if (p.getAvatarIcon() != null) {
+                g2.drawImage(p.getAvatarIcon().getImage(), x, y, size, size, null);
+                // Border warna pemain
+                g2.setColor(p.getColor());
+                g2.setStroke(new BasicStroke(2));
+                g2.drawRect(x-1, y-1, size+2, size+2);
+            } else {
+                // Fallback bulat biasa
+                g2.setColor(p.getColor());
+                g2.fillOval(x, y, size, size);
+                g2.setColor(Color.WHITE);
+                g2.setStroke(new BasicStroke(2));
+                g2.drawOval(x, y, size, size);
             }
         }
     }
 
     public static void main(String[] args) {
-        // Menggunakan Nimbus Look and Feel agar UI lebih modern
         try {
             for (UIManager.LookAndFeelInfo info : UIManager.getInstalledLookAndFeels()) {
                 if ("Nimbus".equals(info.getName())) {
@@ -673,9 +855,7 @@ public class SnakeLadderGame extends JFrame {
                     break;
                 }
             }
-        } catch (Exception e) {
-            // If Nimbus is not available, fall back to default
-        }
+        } catch (Exception e) {}
         SwingUtilities.invokeLater(() -> new SnakeLadderGame().setVisible(true));
     }
 }

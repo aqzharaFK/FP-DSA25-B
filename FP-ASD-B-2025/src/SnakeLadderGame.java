@@ -1,3 +1,4 @@
+import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
@@ -9,6 +10,8 @@ import java.util.*;
 import java.util.List;
 import java.util.Queue;
 import javax.swing.Timer;
+import java.awt.geom.AffineTransform;
+
 
 // ===========================
 // 1. DATA MODELS
@@ -21,8 +24,12 @@ class Player implements Comparable<Player> {
     private int score;
     private int wins;
     private Color color;
-    private String characterType; // Menyimpan tipe karakter (Doraemon, X, O, dll)
+    private String characterType;
     private ImageIcon avatarIcon;
+
+    private int lastClimbedLadderStart = -1;
+    private int lastClimbedLadderEnd = -1;
+
 
     public Player(int id, String name, Color color, String charType, ImageIcon icon) {
         this.id = id;
@@ -47,6 +54,19 @@ class Player implements Comparable<Player> {
     public int getScore() { return score; }
     public ImageIcon getAvatarIcon() { return avatarIcon; }
     public String getCharacterType() { return characterType; }
+    public void setLastClimbedLadder(int start, int end) {
+        this.lastClimbedLadderStart = start;
+        this.lastClimbedLadderEnd = end;
+    }
+
+    public void clearLastClimbedLadder() {
+        this.lastClimbedLadderStart = -1;
+        this.lastClimbedLadderEnd = -1;
+    }
+
+    public int getLastClimbedLadderStart() {return lastClimbedLadderStart;}
+    public int getLastClimbedLadderEnd() {return lastClimbedLadderEnd;}
+
 
     @Override
     public int compareTo(Player other) { return Integer.compare(other.score, this.score); }
@@ -65,14 +85,19 @@ class GameBoard {
     }
 
     private void initObstacles() {
-        // Ular/Naga (Turun)
-        snakes.put(98, 79); snakes.put(95, 75); snakes.put(93, 73); snakes.put(87, 24);
-        snakes.put(64, 60); snakes.put(62, 19); snakes.put(54, 34); snakes.put(17, 7);
+        snakes.clear(); // ❌ TIDAK ADA ULAR
 
         // Tangga (Naik)
-        ladders.put(4, 14); ladders.put(9, 31); ladders.put(20, 38); ladders.put(28, 84);
-        ladders.put(40, 59); ladders.put(51, 67); ladders.put(63, 81); ladders.put(71, 91);
+        ladders.put(4, 14);
+        ladders.put(9, 31);
+        ladders.put(20, 38);
+        ladders.put(28, 84);
+        ladders.put(40, 59);
+        ladders.put(51, 67);
+        ladders.put(63, 81);
+        ladders.put(71, 91);
     }
+
 
     private void initCellScores() {
         Random rand = new Random();
@@ -154,15 +179,25 @@ public class SnakeLadderGame extends JFrame {
 
     private void loadDiceImages() {
         diceIcons = new ImageIcon[6];
-        for (int i = 0; i < 6; i++) {
-            int diceValue = i + 1;
-            String path = diceValue + ".png";
-            File f = new File(path);
-            if (!f.exists()) path = "src/" + diceValue + ".png";
 
-            diceIcons[i] = loadScaledImage(path, 80, 80, diceValue);
+        for (int i = 0; i < 6; i++) {
+            try {
+                BufferedImage img = ImageIO.read(
+                        Objects.requireNonNull(
+                                getClass().getResource("/" + (i + 1) + ".png")
+                        )
+                );
+
+                Image scaled = img.getScaledInstance(90, 90, Image.SCALE_SMOOTH);
+                diceIcons[i] = new ImageIcon(scaled);
+
+            } catch (Exception e) {
+                diceIcons[i] = new ImageIcon(); // fallback kosong
+            }
         }
     }
+
+
 
     private ImageIcon loadScaledImage(String path, int w, int h, int val) {
         File f = new File(path);
@@ -453,32 +488,76 @@ public class SnakeLadderGame extends JFrame {
 
         // Aturan batas bawah dan atas
         if (targetPos < 1) targetPos = 1;
-        if (targetPos > 100) targetPos = 200 - targetPos; // Memantul jika lebih dari 100 (opsional) atau diam di tempat.
-        // Kita pakai aturan harus pas 100. Jika lebih, diam di tempat (opsi simpel)
+        if (targetPos > 100) targetPos = 200 - targetPos;
         if (startPos + steps > 100) targetPos = startPos;
 
-        final int finalTarget = targetPos; // effectively final for lambda
+        final int finalTarget = targetPos;
 
         animateMove(currentPlayer, finalTarget, () -> {
-            // Cek Ular/Tangga
+
+            // =====================================
+            // ATURAN BARU: MUNDUR KE TANGGA TERAKHIR
+            // =====================================
+            if (steps < 0) {
+                if (currentPlayer.getPosition() ==
+                        currentPlayer.getLastClimbedLadderEnd()) {
+
+                    log("⬇️ MUNDUR KE TANGGA TERAKHIR! TURUN KEMBALI!");
+
+                    currentPlayer.setPosition(
+                            currentPlayer.getLastClimbedLadderStart()
+                    );
+                    currentPlayer.clearLastClimbedLadder();
+                    boardPanel.repaint();
+                    finishTurn(currentPlayer);
+                    return;
+                }
+            }
+
+            // ================================
+            // CEK TANGGA / ULAR
+            // ================================
             int obstacleDest = board.checkJump(currentPlayer.getPosition());
 
             if (obstacleDest != currentPlayer.getPosition()) {
-                String type = (obstacleDest > currentPlayer.getPosition()) ? "NAIK TANGGA! 🪜" : "DITANGKAP NAGA! 🐉";
-                log(type + " Pindah ke " + obstacleDest);
-                currentPlayer.setPosition(obstacleDest);
+
+                if (obstacleDest > currentPlayer.getPosition()) {
+                    int start = currentPlayer.getPosition();
+                    int end = obstacleDest;
+
+                    log("NAIK TANGGA! 🪜 Dari " + start + " ke " + end);
+
+                    currentPlayer.setPosition(end);
+                    currentPlayer.setLastClimbedLadder(start, end);
+                } else {
+                    log("DITANGKAP NAGA! 🐉 Turun ke " + obstacleDest);
+                    currentPlayer.setPosition(obstacleDest);
+                    currentPlayer.clearLastClimbedLadder();
+                }
+
                 boardPanel.repaint();
             }
 
-            currentPlayer.addScore(board.getScoreForCell(currentPlayer.getPosition()));
+            currentPlayer.addScore(
+                    board.getScoreForCell(currentPlayer.getPosition())
+            );
 
             if (currentPlayer.getPosition() == 100) {
                 currentPlayer.addWin();
-                JOptionPane.showMessageDialog(this, "SELAMAT! " + currentPlayer.getName() + " MENANG!");
+                JOptionPane.showMessageDialog(
+                        this,
+                        "SELAMAT! " + currentPlayer.getName() + " MENANG!"
+                );
                 resetGameToMenu();
             } else {
-                extraTurnPending = (currentPlayer.getPosition() % 10 == 0 && currentPlayer.getPosition() != 100);
-                if(extraTurnPending) log("⭐ Bonus Giliran (Kelipatan 10)!");
+                extraTurnPending =
+                        (currentPlayer.getPosition() % 10 == 0 &&
+                                currentPlayer.getPosition() != 100);
+
+                if (extraTurnPending) {
+                    log("⭐ Bonus Giliran (Kelipatan 10)!");
+                }
+
                 finishTurn(currentPlayer);
             }
         });
@@ -624,87 +703,54 @@ public class SnakeLadderGame extends JFrame {
     }
 
     // ===========================
-    // BOARD PANEL (TIDAK BERUBAH DARI SEBELUMNYA)
-    // ===========================
+// BOARD PANEL (DENGAN BACKGROUND DORAEMON)
+// ===========================
     class BoardPanel extends JPanel {
+
         private final Point[] tileCoords = new Point[101];
         private final int TILE_RADIUS = 22;
 
+        private static final double SCALE = 1.35;
+        private static final int OFFSET_X = -30;
+        private static final int OFFSET_Y = -193;
+
+        private BufferedImage backgroundImage;
+
         public BoardPanel() {
-            setBackground(new Color(135, 206, 250));
+            setOpaque(true);
             initPathCoords();
+
+            try {
+                backgroundImage = ImageIO.read(
+                        Objects.requireNonNull(
+                                getClass().getResource("/Background_Doraemon.jpeg")
+                        )
+                );
+            } catch (Exception e) {
+                backgroundImage = null;
+            }
         }
 
         private void initPathCoords() {
-            // Baris bawah (Start -> Kanan)
-            tileCoords[1] = new Point(60, 750);  tileCoords[2] = new Point(110, 730);
-            tileCoords[3] = new Point(160, 720); tileCoords[4] = new Point(210, 730);
-            tileCoords[5] = new Point(260, 750); tileCoords[6] = new Point(310, 720);
-            tileCoords[7] = new Point(360, 690); tileCoords[8] = new Point(410, 670);
-            tileCoords[9] = new Point(460, 660); tileCoords[10] = new Point(510, 670);
+            int startX = 100;
+            int startY = 720;
+            int size   = 60;
 
-            // Naik dan berbelok ke kiri
-            tileCoords[11] = new Point(560, 690); tileCoords[12] = new Point(610, 720);
-            tileCoords[13] = new Point(660, 700); tileCoords[14] = new Point(700, 660);
-            tileCoords[15] = new Point(730, 610); tileCoords[16] = new Point(700, 570);
-            tileCoords[17] = new Point(650, 550); tileCoords[18] = new Point(600, 540);
-            tileCoords[19] = new Point(550, 550); tileCoords[20] = new Point(500, 570);
+            boolean leftToRight = true;
+            int num = 1;
 
-            // Lanjut ke kiri
-            tileCoords[21] = new Point(450, 600); tileCoords[22] = new Point(400, 620);
-            tileCoords[23] = new Point(350, 630); tileCoords[24] = new Point(300, 620);
-            tileCoords[25] = new Point(250, 600); tileCoords[26] = new Point(200, 580);
-            tileCoords[27] = new Point(150, 570); tileCoords[28] = new Point(100, 580);
-            tileCoords[29] = new Point(60, 600);  tileCoords[30] = new Point(50, 550);
+            for (int row = 0; row < 10; row++) {
+                for (int col = 0; col < 10; col++) {
 
-            // Naik di sisi kiri
-            tileCoords[31] = new Point(60, 500);  tileCoords[32] = new Point(90, 460);
-            tileCoords[33] = new Point(130, 430); tileCoords[34] = new Point(180, 410);
-            tileCoords[35] = new Point(230, 400); tileCoords[36] = new Point(280, 410);
-            tileCoords[37] = new Point(330, 430); tileCoords[38] = new Point(380, 450);
-            tileCoords[39] = new Point(430, 430); tileCoords[40] = new Point(470, 400);
+                    int x = leftToRight
+                            ? startX + col * size
+                            : startX + (9 - col) * size;
 
-            // Area tengah berliku
-            tileCoords[41] = new Point(510, 370); tileCoords[42] = new Point(550, 350);
-            tileCoords[43] = new Point(590, 340); tileCoords[44] = new Point(630, 350);
-            tileCoords[45] = new Point(670, 370); tileCoords[46] = new Point(710, 400);
-            tileCoords[47] = new Point(750, 430); tileCoords[48] = new Point(790, 450);
-            tileCoords[49] = new Point(830, 430); tileCoords[50] = new Point(860, 400);
-
-            // Naik di sisi kanan
-            tileCoords[51] = new Point(880, 350); tileCoords[52] = new Point(860, 300);
-            tileCoords[53] = new Point(820, 270); tileCoords[54] = new Point(770, 260);
-            tileCoords[55] = new Point(720, 270); tileCoords[56] = new Point(670, 290);
-            tileCoords[57] = new Point(620, 310); tileCoords[58] = new Point(570, 300);
-            tileCoords[59] = new Point(530, 270); tileCoords[60] = new Point(500, 230);
-
-            // Menuju kiri atas
-            tileCoords[61] = new Point(460, 200); tileCoords[62] = new Point(410, 190);
-            tileCoords[63] = new Point(360, 200); tileCoords[64] = new Point(310, 220);
-            tileCoords[65] = new Point(260, 250); tileCoords[66] = new Point(210, 270);
-            tileCoords[67] = new Point(160, 280); tileCoords[68] = new Point(120, 260);
-            tileCoords[69] = new Point(90, 230);  tileCoords[70] = new Point(70, 190);
-
-            // Pojok kiri atas dan kembali ke kanan
-            tileCoords[71] = new Point(70, 140);  tileCoords[72] = new Point(100, 100);
-            tileCoords[73] = new Point(140, 80);  tileCoords[74] = new Point(190, 70);
-            tileCoords[75] = new Point(240, 70);  tileCoords[76] = new Point(290, 80);
-            tileCoords[77] = new Point(340, 100); tileCoords[78] = new Point(390, 130);
-            tileCoords[79] = new Point(440, 150); tileCoords[80] = new Point(490, 160);
-
-            // Bagian akhir menuju kanan atas
-            tileCoords[81] = new Point(540, 160); tileCoords[82] = new Point(590, 150);
-            tileCoords[83] = new Point(640, 130); tileCoords[84] = new Point(690, 110);
-            tileCoords[85] = new Point(740, 100); tileCoords[86] = new Point(790, 100);
-            tileCoords[87] = new Point(840, 110); tileCoords[88] = new Point(880, 130);
-            tileCoords[89] = new Point(910, 160); tileCoords[90] = new Point(930, 200);
-
-            // Finish line
-            tileCoords[91] = new Point(930, 250); tileCoords[92] = new Point(910, 290);
-            tileCoords[93] = new Point(880, 320); tileCoords[94] = new Point(840, 330);
-            tileCoords[95] = new Point(800, 320); tileCoords[96] = new Point(770, 290);
-            tileCoords[97] = new Point(750, 250); tileCoords[98] = new Point(750, 200);
-            tileCoords[99] = new Point(770, 160); tileCoords[100]= new Point(800, 120);
+                    int y = startY - row * size;
+                    tileCoords[num++] = new Point(x, y);
+                }
+                leftToRight = !leftToRight;
+            }
         }
 
         @Override
@@ -713,27 +759,32 @@ public class SnakeLadderGame extends JFrame {
             Graphics2D g2 = (Graphics2D) g;
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-            drawBackground(g2);
+            // BACKGROUND IMAGE
+            if (backgroundImage != null) {
+                g2.drawImage(backgroundImage, 0, 0, getWidth(), getHeight(), null);
+            }
+
+            // OVERLAY AGAR PAPAN JELAS
+            g2.setColor(new Color(255, 255, 255, 120));
+            g2.fillRect(0, 0, getWidth(), getHeight());
+
+            AffineTransform original = g2.getTransform();
+
+            g2.translate(OFFSET_X, OFFSET_Y);
+            g2.scale(SCALE, SCALE);
+
             drawPath(g2);
             drawObstacles(g2);
             drawTiles(g2);
 
-            // Gambar Player
             if (allPlayers != null) {
-                for (int i=0; i<allPlayers.size(); i++) {
+                for (int i = 0; i < allPlayers.size(); i++) {
                     drawPlayer(g2, allPlayers.get(i), i, allPlayers.size());
                 }
             }
-            drawFinishGate(g2, tileCoords[100]);
-        }
 
-        private void drawBackground(Graphics2D g2) {
-            GradientPaint gp = new GradientPaint(0, 0, new Color(135, 206, 235), 0, getHeight(), new Color(240, 255, 255));
-            g2.setPaint(gp);
-            g2.fillRect(0, 0, getWidth(), getHeight());
-            g2.setColor(new Color(255, 255, 255, 200));
-            g2.fillOval(100, 150, 250, 120);
-            g2.fillOval(500, 50, 300, 150);
+            drawFinishGate(g2, tileCoords[100]);
+            g2.setTransform(original);
         }
 
         private void drawPath(Graphics2D g2) {
